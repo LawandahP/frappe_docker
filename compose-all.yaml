@@ -94,12 +94,12 @@ services:
         echo "sites/common_site_config.json found";
         if [ -d "sites/frontend" ]; then
           echo "Site frontend already exists, checking for missing apps...";
-          for app in `cat sites/apps.txt | grep -v frappe`; do
+          for app in `cat sites/apps.txt | grep -v "^frappe$$"`; do
             bench --site frontend list-apps | grep -q $$app || bench --site frontend install-app $$app;
           done
         else
           INSTALL_ARGS="";
-          for app in `cat sites/apps.txt | grep -v frappe`; do INSTALL_ARGS="$$INSTALL_ARGS --install-app $$app"; done;
+          for app in `cat sites/apps.txt | grep -v "^frappe$$"`; do INSTALL_ARGS="$$INSTALL_ARGS --install-app $$app"; done;
           bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin $$INSTALL_ARGS --set-default frontend;
         fi;
 

@@ -78,12 +78,12 @@ Modify the `create-site` service's command to explicitly install all the apps in
         # ... wait scripts ...
         if [ -d "sites/frontend" ]; then
           echo "Site frontend already exists, checking for missing apps...";
-          for app in `cat sites/apps.txt | grep -v frappe`; do
+          for app in `cat sites/apps.txt | grep -v "^frappe$$"`; do
             bench --site frontend list-apps | grep -q $$app || bench --site frontend install-app $$app;
           done
         else
           INSTALL_ARGS="";
-          for app in `cat sites/apps.txt | grep -v frappe`; do INSTALL_ARGS="$$INSTALL_ARGS --install-app $$app"; done;
+          for app in `cat sites/apps.txt | grep -v "^frappe$$"`; do INSTALL_ARGS="$$INSTALL_ARGS --install-app $$app"; done;
           bench new-site --mariadb-user-host-login-scope='%' \
             --admin-password=admin \
             --db-root-username=root \
@@ -132,3 +132,50 @@ IMAGE_TAG=v1 docker compose -f compose-all.yaml up create-site
 ```
 
 Congratulations! You now have a unified cluster running the classic Frappe ERP backend alongside the modern, unbundled frontend apps.
+
+---
+
+## Step 6: Updating Apps (Production Workflow)
+
+In a Dockerized Frappe environment, you **never** log into a container and run `git pull` or `bench update`. The architecture is designed to be immutable. 
+
+When updates are released for ERPNext, CRM, or any other app, you must build a new image and migrate your database:
+
+### 1. Build a new image version
+Run the build command again, but increment your `IMAGE_TAG` (e.g., from `v1` to `v2`). Because we use `--no-cache`, Docker will fetch the absolute latest code from GitHub for the branches specified in your `apps.json`.
+```bash
+IMAGE_TAG=v2 COMPOSE_BAKE=true docker compose -f compose-all.yaml build --no-cache
+```
+
+### 2. Swap the containers to the new image
+Run the `up -d` command with your new tag. Docker will gracefully stop your old `v1` containers and start the `v2` containers. Your database and data remain untouched.
+```bash
+IMAGE_TAG=v2 docker compose -f compose-all.yaml up -d
+```
+
+### 3. Run database migrations
+The new code might contain changes to the database schema (new fields, new tables, or data patches). You must tell the backend to apply these migrations to your site.
+```bash
+IMAGE_TAG=v2 docker compose -f compose-all.yaml exec backend bench --site frontend migrate
+```
+Once the migration finishes, your system is fully updated!
+
+---
+
+## Troubleshooting
+
+### `TableMissingError` (or `ProgrammingError`) immediately after an update
+If you check your docker logs right after running `docker compose up -d` with a new image and see errors from the background workers (e.g., `queue-long` or `scheduler`) that look like this:
+
+> `pymysql.err.ProgrammingError: ('DocType', 'Some Table Name')`
+
+**Don't panic! This is a harmless race condition.** 
+
+**Why it happens:** When the new containers start, the background workers immediately load the new Python code into memory. However, the database hasn't been updated yet because the `create-site` or `migrate` command hasn't finished running. The new code tries to query a database table that doesn't exist yet, causing a temporary crash.
+
+**The Fix:**
+1. Wait a few minutes. If the `create-site` script is currently running, the errors will automatically stop the moment it finishes generating the new tables.
+2. If the errors persist, manually force a database migration to ensure the schema is synced:
+   ```bash
+   IMAGE_TAG=v4 docker compose -f compose-all.yaml exec backend bench --site frontend migrate
+   ```
