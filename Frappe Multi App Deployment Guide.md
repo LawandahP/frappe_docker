@@ -179,3 +179,4 @@ If you check your docker logs right after running `docker compose up -d` with a 
    ```bash
    IMAGE_TAG=v4 docker compose -f compose-all.yaml exec backend bench --site frontend migrate
    ```
+
